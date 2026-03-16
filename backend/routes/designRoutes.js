@@ -23,9 +23,22 @@ router.post("/", authMiddleware, async (req, res) => {
 });
 
 // get all design for user
-router.get("/",authMiddleware, async (req,res)=>{
-    const designs = await Design.find({userId: req.userId});
+import mongoose from "mongoose";
+
+router.get("/", authMiddleware, async (req, res) => {
+
+  try {
+
+    const designs = await Design.find({
+      userId: new mongoose.Types.ObjectId(req.user.id)
+    });
+
     res.json(designs);
+
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+
 });
 
 // Delete design
