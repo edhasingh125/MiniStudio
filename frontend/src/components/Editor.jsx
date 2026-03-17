@@ -1,141 +1,128 @@
 import { useEffect, useRef } from "react";
-import * as fabric from "fabric";
+import { Canvas, Text } from "fabric";
 import axios from "axios";
-
 
 function Editor() {
 
   const canvasRef = useRef(null);
   const fabricCanvas = useRef(null);
 
+  // Initialize canvas
   useEffect(() => {
+  if (!canvasRef.current) return;
 
-    fabricCanvas.current = new fabric.Canvas(canvasRef.current, {
-      width: 800,
-      height: 500,
-      backgroundColor: "#ffffff"
-    });
+  // Prevent re-initialization
+  if (fabricCanvas.current) return;
 
-    const text = new fabric.Text("Hello MiniStudio", {
-      left: 200,
-      top: 200
+  fabricCanvas.current = new Canvas(canvasRef.current, {
+    width: 800,
+    height: 500,
+    backgroundColor: "#ebe1e1"
+  });
+
+  return () => {
+    fabricCanvas.current?.dispose();
+    fabricCanvas.current = null;
+  };
+}, []);
+
+  // Add Text
+  const addText = () => {
+    const text = new Text("New Text", {
+      left: 100,
+      top: 100,
+      fill: "black"
     });
 
     fabricCanvas.current.add(text);
-
-    return () => {
-      fabricCanvas.current.dispose();
-    };
-
-  }, []);
-
-  const addText = () => {
-
-  const text = new fabric.Text("New Text", {
-    left: 100,
-    top: 100,
-    fill: "black"
-  });
-
-  fabricCanvas.current.add(text);
   };
+
+  // Delete Object
   const deleteObject = () => {
+    const activeObject = fabricCanvas.current.getActiveObject();
 
-  const activeObject = fabricCanvas.current.getActiveObject();
-
-  if (activeObject) {
-    fabricCanvas.current.remove(activeObject);
-  }
+    if (activeObject) {
+      fabricCanvas.current.remove(activeObject);
+    }
   };
 
+  // Change Color
   const changeColor = () => {
+    const activeObject = fabricCanvas.current.getActiveObject();
 
-  const activeObject = fabricCanvas.current.getActiveObject();
-
-  if (activeObject) {
-    activeObject.set("fill", "red");
-    fabricCanvas.current.renderAll();
-  }
+    if (activeObject) {
+      activeObject.set("fill", "red");
+      fabricCanvas.current.renderAll();
+    }
   };
-  const saveDesign = async () => {
 
-  try {
-
+  // Save Design
+  const handleSave = async () => {
     const canvasData = fabricCanvas.current.toJSON();
 
-    const token = localStorage.getItem("token");
-
-    const response = await axios.post(
+    await axios.post(
       "http://localhost:5000/api/designs",
       {
         title: "My Design",
-        canvasData: canvasData
+        canvasData
       },
       {
         headers: {
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${localStorage.getItem("token")}`
         }
       }
     );
 
-    alert("Design saved successfully!");
-
-    console.log(response.data);
-
-  } catch (error) {
-
-    console.error(error);
-    alert("Error saving design");
-
-  }
-
+    alert("Design saved!");
   };
-  const loadDesigns = async () => {
 
-  try {
-
-    const token = localStorage.getItem("token");
-
-    const response = await axios.get(
-      "http://localhost:5000/api/designs",
-      {
+  // Load Design
+  const handleLoad = async () => {
+    try {
+      const res = await axios.get("http://localhost:5000/api/designs", {
         headers: {
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${localStorage.getItem("token")}`
         }
+      });
+
+      const designs = res.data;
+
+      if (designs.length === 0) {
+        alert("No designs found");
+        return;
       }
-    );
 
-    console.log("My designs:", response.data);
+      const firstDesign = designs[0];
 
-    alert(`Found ${response.data.length} saved designs`);
+      fabricCanvas.current.loadFromJSON(firstDesign.canvasData, () => {
+        fabricCanvas.current.renderAll();
+      });
 
-  } catch (error) {
-
-    console.error(error);
-
-  }
-
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   return (
-  <div>
+    <div style={{ padding: "20px" }}>
 
-    <div style={{ marginBottom: "10px" }}>
-      <button onClick={addText}>Add Text</button>
-      <button onClick={deleteObject}>Delete</button>
-      <button onClick={changeColor}>Change Color</button>
-      <button onClick={saveDesign}>Save Design</button>
-      <button onClick={loadDesigns}>Load Designs</button>
+      <h2>MiniStudio Editor</h2>
+
+      <div style={{ marginBottom: "10px" }}>
+        <button onClick={addText}>Add Text</button>
+        <button onClick={deleteObject}>Delete</button>
+        <button onClick={changeColor}>Change Color</button>
+        <button onClick={handleSave}>Save Design</button>
+        <button onClick={handleLoad}>Load Designs</button>
+      </div>
+
+      <canvas
+        ref={canvasRef}
+        style={{ border: "1px solid #ccc" }}
+      ></canvas>
+
     </div>
-
-    <canvas
-      ref={canvasRef}
-      style={{ border: "1px solid #ccc" }}
-    ></canvas>
-
-  </div>
-);
-
+  );
 }
 
 export default Editor;
