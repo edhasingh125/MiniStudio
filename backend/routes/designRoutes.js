@@ -26,25 +26,34 @@ router.post("/", authMiddleware, async (req, res) => {
 import mongoose from "mongoose";
 
 router.get("/", authMiddleware, async (req, res) => {
-
   try {
-
-    const designs = await Design.find({
-      userId: new mongoose.Types.ObjectId(req.user.id)
-    });
-
+    const designs = await Design.find({ userId: req.user.id });
     res.json(designs);
-
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
-
 });
 
 // Delete design
 router.delete("/.id",authMiddleware, async (req,res)=>{
     await Design.findByIdAndDelete(req.params.id);
     res.json({message: "Design delete"});
+});
+// put 
+router.put("/:id", async (req, res) => {
+  try {
+    const { title } = req.body;
+
+    const updatedDesign = await Design.findByIdAndUpdate(
+      req.params.id,
+      { title },
+      { new: true } // IMPORTANT
+    );
+
+    res.json(updatedDesign);
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
 export default router;
