@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Canvas, Text } from "fabric";
+import { Canvas, Text, Rect, Circle, Image as FabricImage } from "fabric";
 import axios from "axios";
 
 function Editor() {
   const canvasRef = useRef(null);
   const fabricCanvas = useRef(null);
   const [designs, setDesigns] = useState([]);
+
+  const history = useRef([]);
+  const redoStack = useRef([]);
 
   // =========================
   // FETCH DESIGNS
@@ -17,19 +20,17 @@ function Editor() {
           Authorization: `Bearer ${localStorage.getItem("token")}`
         }
       });
-
       setDesigns(res.data);
     } catch (error) {
-      console.error("Fetch error:", error);
+      console.error(error);
     }
   };
 
   // =========================
-  // INITIALIZE CANVAS
+  // INIT CANVAS
   // =========================
   useEffect(() => {
-    if (!canvasRef.current) return;
-    if (fabricCanvas.current) return;
+    if (!canvasRef.current || fabricCanvas.current) return;
 
     fabricCanvas.current = new Canvas(canvasRef.current, {
       width: 800,
@@ -39,111 +40,179 @@ function Editor() {
 
     fetchDesigns();
 
+    // History tracking
+    fabricCanvas.current.on("object:added", saveHistory);
+    fabricCanvas.current.on("object:modified", saveHistory);
+    fabricCanvas.current.on("object:removed", saveHistory);
+
+    saveHistory(); // initial state
+
     return () => {
-      fabricCanvas.current?.dispose();
+      fabricCanvas.current.dispose();
       fabricCanvas.current = null;
     };
   }, []);
 
   // =========================
-  // ADD TEXT
+  // HISTORY
+  // =========================
+  const saveHistory = () => {
+    const json = fabricCanvas.current.toJSON();
+    history.current.push(json);
+  };
+
+  const undo = () => {
+    if (history.current.length < 2) return;
+
+    const last = history.current.pop();
+    redoStack.current.push(last);
+
+    const prev = history.current[history.current.length - 1];
+
+    fabricCanvas.current.loadFromJSON(prev, () => {
+      fabricCanvas.current.renderAll();
+    });
+  };
+
+  const redo = () => {
+    if (!redoStack.current.length) return;
+
+    const state = redoStack.current.pop();
+    history.current.push(state);
+
+    fabricCanvas.current.loadFromJSON(state, () => {
+      fabricCanvas.current.renderAll();
+    });
+  };
+
+  // =========================
+  // CANVAS ACTIONS
   // =========================
   const addText = () => {
-    const text = new Text("New Text", {
-      left: 100,
-      top: 100,
-      fill: "black"
-    });
-
+    const text = new Text("New Text", { left: 100, top: 100, fill: "black" });
     fabricCanvas.current.add(text);
   };
 
-  // =========================
-  // DELETE OBJECT
-  // =========================
-  const deleteObject = () => {
-    const activeObject = fabricCanvas.current.getActiveObject();
-
-    if (activeObject) {
-      fabricCanvas.current.remove(activeObject);
-    }
+  const addRectangle = () => {
+    const rect = new Rect({
+      left: 150,
+      top: 150,
+      width: 100,
+      height: 60,
+      fill: "blue"
+    });
+    fabricCanvas.current.add(rect);
   };
 
-  // =========================
-  // CHANGE COLOR
-  // =========================
-  const changeColor = () => {
-    const activeObject = fabricCanvas.current.getActiveObject();
+  const addCircle = () => {
+    const circle = new Circle({
+      left: 200,
+      top: 200,
+      radius: 50,
+      fill: "green"
+    });
+    fabricCanvas.current.add(circle);
+  };
 
-    if (activeObject) {
-      activeObject.set("fill", "red");
+  const deleteObject = () => {
+    const obj = fabricCanvas.current.getActiveObject();
+    if (obj) fabricCanvas.current.remove(obj);
+  };
+
+  const changeColor = () => {
+    const obj = fabricCanvas.current.getActiveObject();
+    if (obj) {
+      obj.set("fill", "red");
       fabricCanvas.current.renderAll();
     }
   };
 
   // =========================
-  // SAVE DESIGN
+  // IMAGE UPLOAD
   // =========================
-  const handleSave = async () => {
-    try {
-      const canvasData = fabricCanvas.current.toJSON();
+  const uploadImage = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
 
-      await axios.post(
-        "http://localhost:5000/api/designs",
-        {
-          title: `Design ${Date.now()}`,
-          canvasData
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`
-          }
-        }
-      );
+  const reader = new FileReader();
 
-      alert("Design saved!");
-      fetchDesigns();
+  reader.onload = (event) => {
+    const imgElement = new Image();
+    imgElement.src = event.target.result;
 
-    } catch (error) {
-      console.error("Save error:", error);
-    }
+    imgElement.onload = () => {
+      const imgInstance = new FabricImage(imgElement, {
+        left: 100,
+        top: 100,
+        scaleX: 0.5,
+        scaleY: 0.5
+      });
+
+      fabricCanvas.current.add(imgInstance);
+      fabricCanvas.current.renderAll();
+    };
   };
 
+  reader.readAsDataURL(file);
+};
+
   // =========================
-  // LOAD DESIGN
+  // BACKEND ACTIONS
   // =========================
+  const handleSave = async () => {
+    const canvasData = fabricCanvas.current.toJSON();
+
+    await axios.post(
+      "http://localhost:5000/api/designs",
+      { title: `Design ${Date.now()}`, canvasData },
+      { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
+    );
+
+    fetchDesigns();
+  };
+
   const loadDesign = (design) => {
     fabricCanvas.current.loadFromJSON(design.canvasData, () => {
       fabricCanvas.current.renderAll();
     });
   };
 
-  // =========================
-  // RENAME DESIGN
-  // =========================
   const renameDesign = async (design) => {
-    const newTitle = prompt("Enter new name:", design.title);
-
+    const newTitle = prompt("Rename:", design.title);
     if (!newTitle) return;
 
-    try {
-      await axios.put(
-        `http://localhost:5000/api/designs/${design._id}`,
-        { title: newTitle },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`
-          }
-        }
-      );
+    await axios.put(
+      `http://localhost:5000/api/designs/${design._id}`,
+      { title: newTitle },
+      { headers: { Authorization: `Bearer ${localStorage.getItem("token")}` } }
+    );
 
-      fetchDesigns();
-      console.log("Updated designs:", res.data);
+    fetchDesigns();
+  };
 
-    } catch (error) {
-      console.error("Rename error:", error);
-    }
-    console.log("Renamed to:", newTitle);
+  const deleteDesign = async (id) => {
+    if (!window.confirm("Delete design?")) return;
+
+    await axios.delete(`http://localhost:5000/api/designs/${id}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` }
+    });
+
+    fetchDesigns();
+  };
+
+  // =========================
+  // DOWNLOAD
+  // =========================
+  const downloadImage = () => {
+    const dataURL = fabricCanvas.current.toDataURL({
+      format: "png",
+      quality: 1
+    });
+
+    const link = document.createElement("a");
+    link.href = dataURL;
+    link.download = "design.png";
+    link.click();
   };
 
   // =========================
@@ -151,62 +220,19 @@ function Editor() {
   // =========================
   return (
     <div style={{ display: "flex", height: "100vh" }}>
-
       {/* SIDEBAR */}
-      <div
-        style={{
-          width: "260px",
-          padding: "15px",
-          borderRight: "1px solid #ccc",
-          background: "#1e1e1e",
-          color: "#fff"
-        }}
-      >
+      <div style={{ width: "260px", padding: "15px", background: "#1e1e1e", color: "#fff" }}>
         <h3>My Designs</h3>
 
-        {designs.length === 0 ? (
-          <p>No designs</p>
-        ) : (
-          designs.map((design) => (
-            <div
-              key={design._id}
-              style={{
-                display: "flex",
-                gap: "5px",
-                marginBottom: "8px"
-              }}
-            >
-              <button
-                onClick={() => loadDesign(design)}
-                style={{
-                  flex: 1,
-                  padding: "6px",
-                  borderRadius: "5px",
-                  border: "none",
-                  background: "#333",
-                  color: "#fff",
-                  cursor: "pointer"
-                }}
-              >
-                {design.title}
-              </button>
-
-              <button
-                onClick={() => renameDesign(design)}
-                style={{
-                  padding: "6px",
-                  borderRadius: "5px",
-                  border: "none",
-                  background: "#555",
-                  color: "#fff",
-                  cursor: "pointer"
-                }}
-              >
-                ✏️
-              </button>
-            </div>
-          ))
-        )}
+        {designs.map((design) => (
+          <div key={design._id} style={{ display: "flex", gap: "5px", marginBottom: "8px" }}>
+            <button onClick={() => loadDesign(design)} style={{ flex: 1 }}>
+              {design.title}
+            </button>
+            <button onClick={() => renameDesign(design)}>✏️</button>
+            <button onClick={() => deleteDesign(design._id)}>🗑️</button>
+          </div>
+        ))}
       </div>
 
       {/* EDITOR */}
@@ -214,18 +240,21 @@ function Editor() {
         <h2>MiniStudio Editor</h2>
 
         <div style={{ marginBottom: "10px" }}>
-          <button onClick={addText}>Add Text</button>
+          <button onClick={addText}>Text</button>
+          <button onClick={addRectangle}>Rectangle</button>
+          <button onClick={addCircle}>Circle</button>
           <button onClick={deleteObject}>Delete</button>
-          <button onClick={changeColor}>Change Color</button>
-          <button onClick={handleSave}>Save Design</button>
+          <button onClick={changeColor}>Color</button>
+          <button onClick={undo}>Undo</button>
+          <button onClick={redo}>Redo</button>
+          <button onClick={handleSave}>Save</button>
+          <button onClick={downloadImage}>Download</button>
+
+          <input type="file" onChange={uploadImage} />
         </div>
 
-        <canvas
-          ref={canvasRef}
-          style={{ border: "1px solid #ccc" }}
-        ></canvas>
+        <canvas ref={canvasRef} style={{ border: "1px solid #ccc" }} />
       </div>
-
     </div>
   );
 }

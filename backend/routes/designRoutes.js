@@ -56,4 +56,14 @@ router.put("/:id", async (req, res) => {
   }
 });
 
+// delete
+router.delete("/:id", async (req, res) => {
+  try {
+    await Design.findByIdAndDelete(req.params.id);
+    res.json({ message: "Design deleted" });
+  } catch (error) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 export default router;
