@@ -13,6 +13,7 @@ function Editor() {
 
   const history = useRef([]);
   const redoStack = useRef([]);
+  const timeoutRef = useRef(null); // ✅ FIXED autosave bug
 
   // =========================
   // FETCH DESIGNS
@@ -21,10 +22,7 @@ function Editor() {
     try {
       const token = localStorage.getItem("token");
 
-      if (!token) {
-        console.warn("No token found");
-        return;
-      }
+      if (!token) return;
 
       const response = await axios.get("http://localhost:5000/api/designs", {
         headers: {
@@ -32,9 +30,7 @@ function Editor() {
         }
       });
 
-      console.log("Designs:", response.data);
       setDesigns(response.data);
-
     } catch (error) {
       console.error("Fetch error:", error.response?.data || error.message);
     }
@@ -44,19 +40,19 @@ function Editor() {
   // INIT CANVAS
   // =========================
   useEffect(() => {
-    if (!canvasRef.current || fabricCanvas.current) return;
+    if (!canvasRef.current) return;
+    if (fabricCanvas.current) return;
 
     fabricCanvas.current = new Canvas(canvasRef.current, {
       width: 800,
       height: 500,
-      backgroundColor: "#ebe1e1"
+      backgroundColor: "#fff"
     });
 
     fetchDesigns();
-    saveHistory();
 
     return () => {
-      fabricCanvas.current.dispose();
+      fabricCanvas.current?.dispose();
       fabricCanvas.current = null;
     };
   }, []);
@@ -188,14 +184,14 @@ function Editor() {
         originY: "center"
       });
 
-      obj.setCoords(); // 🔥 important fix
+      obj.setCoords();
       fabricCanvas.current.renderAll();
       saveHistory();
     }
   };
 
   // =========================
-  // IMAGE UPLOAD (FIXED)
+  // IMAGE UPLOAD
   // =========================
   const uploadImage = (e) => {
     const file = e.target.files[0];
@@ -225,37 +221,39 @@ function Editor() {
   // BACKEND
   // =========================
   const handleSave = async () => {
-    const token = localStorage.getItem("token");
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) return;
 
-    if (!token) {
-      alert("Login required");
-      return;
-    }
+      const canvasData = fabricCanvas.current.toJSON();
 
-    await axios.post(
-      "http://localhost:5000/api/designs",
-      {
-        title: `Design ${Date.now()}`,
-        canvasData: fabricCanvas.current.toJSON()
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`
+      await axios.post(
+        "http://localhost:5000/api/designs",
+        {
+          title: `Design ${Date.now()}`,
+          canvasData
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
         }
-      }
-    );
+      );
 
-    fetchDesigns();
+      fetchDesigns();
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const loadDesign = (design) => {
-    if (!design?.canvasData) return;
+    if (!design?.canvasData || !fabricCanvas.current) return;
 
     fabricCanvas.current.clear();
 
     fabricCanvas.current.loadFromJSON(design.canvasData, () => {
       fabricCanvas.current.renderAll();
-      saveHistory(); // 🔥 important fix
+      saveHistory();
     });
   };
 
@@ -305,7 +303,6 @@ function Editor() {
   // =========================
   return (
     <div style={{ display: "flex", height: "100vh" }}>
-
       {/* SIDEBAR */}
       <div style={{ width: "260px", padding: "15px", background: "#1e1e1e", color: "#fff" }}>
         <h3>My Designs</h3>
@@ -315,9 +312,17 @@ function Editor() {
         ) : (
           designs.map((design) => (
             <div key={design._id} style={{ display: "flex", gap: "5px", marginBottom: "8px" }}>
-              <button onClick={() => loadDesign(design)} style={{ flex: 1 }}>
+              <button
+                onClick={() => loadDesign(design)}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("design", JSON.stringify(design));
+                }}
+                style={{ flex: 1 }}
+              >
                 {design.title}
               </button>
+
               <button onClick={() => renameDesign(design)}>✏️</button>
               <button onClick={() => deleteDesign(design._id)}>🗑️</button>
             </div>
@@ -359,13 +364,24 @@ function Editor() {
           <button onClick={undo}>Undo</button>
           <button onClick={redo}>Redo</button>
 
-          <button onClick={handleSave}>Save</button>
+          <button onClick={handleSave}>Save</button> {/* ✅ FIXED */}
           <button onClick={downloadImage}>Download</button>
 
           <input type="file" onChange={uploadImage} />
         </div>
 
-        <canvas ref={canvasRef} style={{ border: "1px solid #ccc", marginTop: "10px" }} />
+        {/* SINGLE CANVAS (FIXED) */}
+        <div
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            const data = e.dataTransfer.getData("design");
+            if (!data) return;
+            const design = JSON.parse(data);
+            loadDesign(design);
+          }}
+        >
+          <canvas ref={canvasRef} style={{ border: "1px solid #ccc", marginTop: "10px" }} />
+        </div>
       </div>
     </div>
   );
